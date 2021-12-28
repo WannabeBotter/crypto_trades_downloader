@@ -13,17 +13,23 @@ from timescaledb_util import TimeScaleDBUtil
 
 class TradesDownloadUtil:
     trades_params = {
-        'bitfinex2': {
+        'bequant': {
             'limit': 1000,
             'max_interval': 24*60*60,
             'start_adjustment': 0.001,
-            'ratelimit_multiplier': 1.2,
+            'ratelimit_multiplier': 1.0,
         },
         'binance': {
             'limit': 1000,
             'max_interval': 60*60,
             'start_adjustment': 0.001,
             'ratelimit_multiplier': 1.0,
+        },
+        'bitfinex2': {
+            'limit': 1000,
+            'max_interval': 24*60*60,
+            'start_adjustment': 0.001,
+            'ratelimit_multiplier': 1.2,
         },
         'ftx': {
             'limit': 5000,
@@ -54,22 +60,26 @@ class TradesDownloadUtil:
             params['end'] = int(end_timestamp*1000)
             params['limit'] = self.trades_params[exchange]['limit']
             params['sort'] = 1
-            return params
         elif exchange == 'binance':
             params['startTime'] = int(start_timestamp*1000)
             params['endTime'] = int(end_timestamp*1000)
             params['limit'] = self.trades_params[exchange]['limit']
-            return params
         elif exchange == 'ftx':
             params['start_time'] = int(start_timestamp)
             params['end_time'] = int(end_timestamp)
-            return params
         elif exchange == 'poloniex':
             params['start'] = int(start_timestamp)
             params['end'] = int(end_timestamp)
             params['limit'] = self.trades_params[exchange]['limit']
-            return params
-            
+        elif exchange == 'bequant':
+            datetime_from = datetime.fromtimestamp(start_timestamp, tz=timezone.utc)
+            datetime_till = datetime.fromtimestamp(end_timestamp, tz=timezone.utc)
+            params['from'] = datetime_from.strftime('%Y-%m-%d %H:%M:%S.%f%z')
+            params['till'] = datetime_till.strftime('%Y-%m-%d %H:%M:%S.%f%z')
+            params['limit'] = self.trades_params[exchange]['limit']
+            params['sort'] = 'ASC'
+        
+        return params
     
     def download_trades(self, exchange=None, symbol=None, since_datetime=None):
         if exchange is None or symbol is None:
