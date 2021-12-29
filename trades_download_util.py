@@ -17,7 +17,7 @@ class TradesDownloadUtil:
             'limit': 1000,
             'max_interval': 24*60*60,
             'start_adjustment': 0.001,
-            'ratelimit_multiplier': 1.0,
+            'ratelimit_multiplier': 1.2,
         },
         'binance': {
             'limit': 1000,
@@ -120,33 +120,36 @@ class TradesDownloadUtil:
                     _params = self._get_fetch_trades_params(exchange, _start_timestamp, _end_timestamp)
                     _result = ccxt_client.fetch_trades(symbol, params=_params)
 
-                    # Update progress bar
-                    if len(_result) > 0:
-                        _pbar.n = min(_till_timestamp-_since_timestamp, _end_timestamp-_since_timestamp)
-                        _pbar.set_postfix_str(f'Exchange: {_exchange}, Symbol: {symbol}, Date = {datetime.utcfromtimestamp(_start_timestamp)}, results: {len(_result)}')
-                    else:
-                        _pbar.n = _start_timestamp - _since_timestamp
-                        _pbar.set_postfix_str(f'Exchange: {_exchange}, Symbol: {symbol}, Date = {datetime.utcfromtimestamp(_start_timestamp)}, results: 0')
-                    _pbar.refresh()
-
                     # Too many results. Adjust _end_timestamp by half
                     if len(_result) >= self.trades_params[exchange]['limit']:
                         # Just update _interval_sec. Don't update _start_timestamp
-                        _interval_sec = max(1, floor(_interval_sec*0.8))
+                        _interval_sec = max(1, floor(_interval_sec*0.5))
                     else:
+                        if len(_result) > 0:
+                            _df = pd.DataFrame.from_dict(_result)
+                            _df = _df[['datetime', 'id', 'side', 'price', 'amount']]
+                            self._dbutil.df_to_sql(df=_df, schema=_trade_table_name, if_exists = 'append')
+                            
+                            # Update progress bar only when DB write happens
+                            if len(_result) > 0:
+                                _pbar.n = min(_till_timestamp-_since_timestamp, _end_timestamp-_since_timestamp)
+                                _pbar.set_postfix_str(f'{_exchange}, {symbol}, start: {datetime.utcfromtimestamp(_start_timestamp)}, interval: {_interval_sec}, row_counts: {len(_result)}')
+                            else:
+                                _pbar.n = _start_timestamp - _since_timestamp
+                                _pbar.set_postfix_str(f'Exchange: {_exchange}, Symbol: {symbol}, Date = {datetime.utcfromtimestamp(_start_timestamp)}, results: 0')
+                            _pbar.refresh()
+                        
                         if len(_result) < self.trades_params[exchange]['limit']*0.9:
                             _interval_sec = min(self.trades_params[exchange]['max_interval'], ceil(_interval_sec * 1.05))                                
                         _start_timestamp = _end_timestamp + self.trades_params[exchange]['start_adjustment'] # endTime in milliseconds is INCLUSIVE
-                        if len(_result) > 0:
-                                _df = pd.DataFrame.from_dict(_result)
-                                _df = _df[['datetime', 'id', 'side', 'price', 'amount']]
-                                self._dbutil.df_to_sql(df=_df, schema=_trade_table_name, if_exists = 'append')
+
                 except ccxt.NetworkError as e:
-                    print(e)
+                    print(f'ccxt.NetworkError : {e}')
                     pass
                 except ccxt.ExchangeError as e:
-                    print(e)
+                    print(f'ccxt.ExchangeError : {e}')
                     break
                 except:
-                    traceback.print_exc()
+                    print(f'Other exceptions : {traceback.format_exc()}')
+                    print(f'length of _result = {len(_result)}')
                     break
