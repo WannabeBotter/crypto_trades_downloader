@@ -3,6 +3,7 @@ from tqdm import tqdm
 import traceback
 
 from datetime import timezone, datetime, timedelta
+import dateutil.parser as dp
 from decimal import Decimal
 from math import ceil, floor
 import pandas as pd
@@ -37,6 +38,12 @@ class TradesDownloadUtil:
             'start_adjustment': 1.0,
             'ratelimit_multiplier': 1.0
         },
+        'kraken': {
+            'limit': 1000,
+            'max_interval': -1,
+            'start_adjustment': 0.00001,
+            'ratelimit_multiplier': 1.0
+        },
         'poloniex': {
             'limit': 1000,
             'max_interval': 24*60*60,
@@ -67,6 +74,8 @@ class TradesDownloadUtil:
         elif exchange == 'ftx':
             params['start_time'] = int(start_timestamp)
             params['end_time'] = int(end_timestamp)
+        elif exchange == 'kraken':
+            params['since'] = int(start_timestamp)
         elif exchange == 'poloniex':
             params['start'] = int(start_timestamp)
             params['end'] = int(end_timestamp)
@@ -109,19 +118,25 @@ class TradesDownloadUtil:
         _total_seconds = _till_timestamp - _since_timestamp
         
         # initial interval is 60 min in sec
-        _interval_sec = 60*60
+        if self.trades_params[exchange]['max_interval'] > 0:
+            _interval_sec = 60*60
+        else:
+            _interval_sec = -1
 
         with tqdm(total = _total_seconds, initial=0) as _pbar:
             while _start_timestamp < _till_timestamp:                
                 try:
                     time.sleep(ccxt_client.rateLimit * self.trades_params[exchange]['ratelimit_multiplier'] / 1000)
                     
-                    _end_timestamp = int(_start_timestamp+_interval_sec)
+                    if self.trades_params[exchange]['max_interval'] > 0:
+                        _end_timestamp = int(_start_timestamp+_interval_sec)
+                    else:
+                        _end_timestamp = _till_timestamp
                     _params = self._get_fetch_trades_params(exchange, _start_timestamp, _end_timestamp)
                     _result = ccxt_client.fetch_trades(symbol, params=_params)
 
                     # Too many results. Adjust _end_timestamp by half
-                    if len(_result) >= self.trades_params[exchange]['limit']:
+                    if self.trades_params[exchange]['max_interval'] > 0 and len(_result) >= self.trades_params[exchange]['limit']:
                         # Just update _interval_sec. Don't update _start_timestamp
                         _interval_sec = max(1, floor(_interval_sec*0.5))
                     else:
@@ -132,17 +147,24 @@ class TradesDownloadUtil:
                             
                             # Update progress bar only when DB write happens
                             if len(_result) > 0:
-                                _pbar.n = min(_till_timestamp-_since_timestamp, _end_timestamp-_since_timestamp)
+                                if self.trades_params[exchange]['max_interval'] > 0:
+                                    _pbar.n = min(_till_timestamp-_since_timestamp, _end_timestamp-_since_timestamp)
+                                else:
+                                    _pbar.n = min(_till_timestamp-_since_timestamp, dp.parse(_df.iloc[-1]['datetime']).timestamp()-_since_timestamp)
+
                                 _pbar.set_postfix_str(f'{_exchange}, {symbol}, start: {datetime.utcfromtimestamp(_start_timestamp)}, interval: {_interval_sec}, row_counts: {len(_result)}')
                             else:
                                 _pbar.n = _start_timestamp - _since_timestamp
                                 _pbar.set_postfix_str(f'Exchange: {_exchange}, Symbol: {symbol}, Date = {datetime.utcfromtimestamp(_start_timestamp)}, results: 0')
                             _pbar.refresh()
                         
-                        if len(_result) < self.trades_params[exchange]['limit']*0.9:
+                        if self.trades_params[exchange]['max_interval'] > 0 and len(_result) < self.trades_params[exchange]['limit']*0.9:
                             _interval_sec = min(self.trades_params[exchange]['max_interval'], ceil(_interval_sec * 1.05))                                
-                        _start_timestamp = _end_timestamp + self.trades_params[exchange]['start_adjustment'] # endTime in milliseconds is INCLUSIVE
-
+                        
+                        if self.trades_params[exchange]['max_interval'] > 0:
+                            _start_timestamp = _end_timestamp + self.trades_params[exchange]['start_adjustment'] # endTime in milliseconds is INCLUSIVE
+                        else:
+                            _start_timestamp = dp.parse(_df.iloc[-1]['datetime']).timestamp() + self.trades_params[exchange]['start_adjustment']
                 except ccxt.NetworkError as e:
                     print(f'ccxt.NetworkError : {e}')
                     pass
