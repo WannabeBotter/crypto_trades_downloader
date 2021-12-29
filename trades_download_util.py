@@ -129,7 +129,7 @@ class TradesDownloadUtil:
                     time.sleep(ccxt_client.rateLimit * self.trades_params[exchange]['ratelimit_multiplier'] / 1000)
                     
                     if self.trades_params[exchange]['max_interval'] > 0:
-                        _end_timestamp = int(_start_timestamp+_interval_sec)
+                        _end_timestamp = _start_timestamp+_interval_sec
                     else:
                         _end_timestamp = _till_timestamp
                     _params = self._get_fetch_trades_params(exchange, _start_timestamp, _end_timestamp)
@@ -162,7 +162,7 @@ class TradesDownloadUtil:
                             _interval_sec = min(self.trades_params[exchange]['max_interval'], ceil(_interval_sec * 1.05))                                
                         
                         if self.trades_params[exchange]['max_interval'] > 0:
-                            _start_timestamp = _end_timestamp + self.trades_params[exchange]['start_adjustment'] # endTime in milliseconds is INCLUSIVE
+                            _start_timestamp = _end_timestamp + self.trades_params[exchange]['start_adjustment']
                         else:
                             _start_timestamp = dp.parse(_df.iloc[-1]['datetime']).timestamp() + self.trades_params[exchange]['start_adjustment']
                 except ccxt.NetworkError as e:
