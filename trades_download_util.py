@@ -41,7 +41,7 @@ class TradesDownloadUtil:
         'kraken': {
             'limit': 1000,
             'max_interval': -1,
-            'start_adjustment': 0.00001,
+            'start_adjustment': 0.001,
             'ratelimit_multiplier': 1.0
         },
         'poloniex': {
@@ -83,8 +83,8 @@ class TradesDownloadUtil:
         elif exchange == 'bequant':
             datetime_from = datetime.fromtimestamp(start_timestamp, tz=timezone.utc)
             datetime_till = datetime.fromtimestamp(end_timestamp, tz=timezone.utc)
-            params['from'] = datetime_from.strftime('%Y-%m-%d %H:%M:%S.%f%z')
-            params['till'] = datetime_till.strftime('%Y-%m-%d %H:%M:%S.%f%z')
+            params['from'] = datetime_from.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]+datetime_from.strftime('%z')
+            params['till'] = datetime_till.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]+datetime_till.strftime('%z')
             params['limit'] = self.trades_params[exchange]['limit']
             params['sort'] = 'ASC'
         
@@ -122,7 +122,7 @@ class TradesDownloadUtil:
             _interval_sec = 60*60
         else:
             _interval_sec = -1
-
+        
         with tqdm(total = _total_seconds, initial=0) as _pbar:
             while _start_timestamp < _till_timestamp:                
                 try:
@@ -132,6 +132,7 @@ class TradesDownloadUtil:
                         _end_timestamp = _start_timestamp+_interval_sec
                     else:
                         _end_timestamp = _till_timestamp
+                    
                     _params = self._get_fetch_trades_params(exchange, _start_timestamp, _end_timestamp)
                     _result = ccxt_client.fetch_trades(symbol, params=_params)
 
@@ -142,7 +143,8 @@ class TradesDownloadUtil:
                     else:
                         if len(_result) > 0:
                             _df = pd.DataFrame.from_dict(_result)
-                            _df = _df[['datetime', 'id', 'side', 'price', 'amount']]
+                            _df = _df[['datetime', 'id', 'side', 'price', 'amount']].sort_values('datetime', ascending=True)
+
                             self._dbutil.df_to_sql(df=_df, schema=_trade_table_name, if_exists = 'append')
                             
                             # Update progress bar only when DB write happens
@@ -173,5 +175,4 @@ class TradesDownloadUtil:
                     break
                 except:
                     print(f'Other exceptions : {traceback.format_exc()}')
-                    print(f'length of _result = {len(_result)}')
                     break
