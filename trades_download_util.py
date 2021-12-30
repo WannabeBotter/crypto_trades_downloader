@@ -17,37 +17,37 @@ class TradesDownloadUtil:
         'bequant': {
             'limit': 1000,
             'max_interval': 24*60*60,
-            'start_adjustment': 0.001,
+            'start_adjustment': 10 ** -3,
             'ratelimit_multiplier': 1.2,
         },
         'binance': {
             'limit': 1000,
             'max_interval': 60*60,
-            'start_adjustment': 0.001,
+            'start_adjustment': 10 ** -3,
             'ratelimit_multiplier': 1.0,
         },
         'bitfinex2': {
             'limit': 1000,
             'max_interval': 24*60*60,
-            'start_adjustment': 0.001,
+            'start_adjustment': 10 ** -3,
             'ratelimit_multiplier': 1.2,
         },
         'ftx': {
             'limit': 5000,
             'max_interval': 24*60*60,
-            'start_adjustment': 1.0,
+            'start_adjustment': 10 ** 0,
             'ratelimit_multiplier': 1.0
         },
         'kraken': {
             'limit': 1000,
             'max_interval': -1,
-            'start_adjustment': 0.001,
+            'start_adjustment': 10 ** -6,
             'ratelimit_multiplier': 1.0
         },
         'poloniex': {
             'limit': 1000,
             'max_interval': 24*60*60,
-            'start_adjustment': 1.0,
+            'start_adjustment': 10 ** 0,
             'ratelimit_multiplier': 1.0
         }
     }
@@ -75,7 +75,7 @@ class TradesDownloadUtil:
             params['start_time'] = int(start_timestamp)
             params['end_time'] = int(end_timestamp)
         elif exchange == 'kraken':
-            params['since'] = int(start_timestamp)
+            params['since'] = f'{int(start_timestamp*1_000_000)}000'
         elif exchange == 'poloniex':
             params['start'] = int(start_timestamp)
             params['end'] = int(end_timestamp)
@@ -83,11 +83,10 @@ class TradesDownloadUtil:
         elif exchange == 'bequant':
             datetime_from = datetime.fromtimestamp(start_timestamp, tz=timezone.utc)
             datetime_till = datetime.fromtimestamp(end_timestamp, tz=timezone.utc)
-            params['from'] = datetime_from.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]+datetime_from.strftime('%z')
-            params['till'] = datetime_till.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]+datetime_till.strftime('%z')
+            params['from'] = datetime_from.strftime('%Y-%m-%d %H:%M:%S.%f%z')
+            params['till'] = datetime_till.strftime('%Y-%m-%d %H:%M:%S.%f%z')
             params['limit'] = self.trades_params[exchange]['limit']
             params['sort'] = 'ASC'
-        
         return params
     
     def download_trades(self, exchange=None, symbol=None, since_datetime=None):
@@ -97,15 +96,17 @@ class TradesDownloadUtil:
         _exchange = exchange
         ccxt_client = getattr(ccxt, _exchange)()
 
+        # Initialize trade table
         self._dbutil.init_trade_table(_exchange, symbol, force=False)
         _trade_table_name = self._dbutil.get_trade_table_name(_exchange, symbol)
 
+        # Default since datetime
         _since_datetime = datetime(2010, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
         _latest_trade = self._dbutil.get_latest_trade(_exchange, symbol)
         if _latest_trade is not None:
             _since_datetime = _latest_trade['datetime'] + timedelta(seconds=self.trades_params[exchange]['start_adjustment'])
-
+        
         if since_datetime is not None and since_datetime > _since_datetime:
             _since_datetime = since_datetime
 
@@ -136,10 +137,10 @@ class TradesDownloadUtil:
                     _params = self._get_fetch_trades_params(exchange, _start_timestamp, _end_timestamp)
                     _result = ccxt_client.fetch_trades(symbol, params=_params)
 
-                    # Too many results. Adjust _end_timestamp by half
+                    # Too many results. Reduce _end_timestamp by half to reduce the result and retry
                     if self.trades_params[exchange]['max_interval'] > 0 and len(_result) >= self.trades_params[exchange]['limit']:
-                        # Just update _interval_sec. Don't update _start_timestamp
-                        _interval_sec = max(1, floor(_interval_sec*0.5))
+                        _interval_sec = max(1.0, floor(_interval_sec*0.5))
+                        _interval_sec = int(_interval_sec // self.trades_params[exchange]['start_adjustment']) * self.trades_params[exchange]['start_adjustment']
                     else:
                         if len(_result) > 0:
                             _df = pd.DataFrame.from_dict(_result)
@@ -161,8 +162,9 @@ class TradesDownloadUtil:
                             _pbar.refresh()
                         
                         if self.trades_params[exchange]['max_interval'] > 0 and len(_result) < self.trades_params[exchange]['limit']*0.9:
-                            _interval_sec = min(self.trades_params[exchange]['max_interval'], ceil(_interval_sec * 1.05))                                
-                        
+                            _interval_sec = min(self.trades_params[exchange]['max_interval'], ceil(_interval_sec * 1.05))
+                            _interval_sec = int(_interval_sec // self.trades_params[exchange]['start_adjustment']) * self.trades_params[exchange]['start_adjustment']
+
                         if self.trades_params[exchange]['max_interval'] > 0:
                             _start_timestamp = _end_timestamp + self.trades_params[exchange]['start_adjustment']
                         else:
@@ -175,4 +177,6 @@ class TradesDownloadUtil:
                     break
                 except:
                     print(f'Other exceptions : {traceback.format_exc()}')
+                    print(f'length of _result = {len(_result)}')
+                    print(f'_params = {_params}')
                     break
