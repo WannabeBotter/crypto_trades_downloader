@@ -127,7 +127,7 @@ class TradesDownloadUtil:
         
         # initial interval is 60 min in sec
         if self.trades_params[exchange]['max_interval'] > 0:
-            _interval_nsec = Decimal(60*60*1_000_000_000)
+            _interval_nsec = Decimal(30*60*1_000_000_000)
             _end_timestamp_nsec = _start_timestamp_nsec + _interval_nsec
         else:
             _interval_nsec = Decimal(-1)
@@ -188,4 +188,6 @@ class TradesDownloadUtil:
                     break
                 except:
                     print(f'Other exceptions : {traceback.format_exc()}')
+                    print(_params)
+                    print(_result)
                     break
