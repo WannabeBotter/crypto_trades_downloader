@@ -23,7 +23,7 @@ class TradesDownloadUtil:
         },
         'binance': {
             'limit': 1000,
-            'max_interval': Decimal(24*60*60*1_000_000_000),
+            'max_interval': Decimal(60*60*1_000_000_000)-Decimal(1_000_000_000),
             'start_adjustment_timeunit': Decimal(1_000_000),
             'start_adjustment': True,
             'ratelimit_multiplier': 1.0,
@@ -151,7 +151,7 @@ class TradesDownloadUtil:
                     else:
                         if len(_result) > 0:
                             _df = pd.DataFrame.from_dict(_result)
-                            _df = _df[['datetime', 'id', 'side', 'price', 'amount']].sort_values('datetime', ascending=True)
+                            _df = _df[['datetime', 'id', 'side', 'price', 'amount']].sort_values('datetime', ascending=True).sort_values('id', ascending=True)
 
                             self._dbutil.df_to_sql(df=_df, schema=_trade_table_name, if_exists = 'append')
                             
