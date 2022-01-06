@@ -107,7 +107,7 @@ class TradesDownloadUtil:
         _trade_table_name = self._dbutil.get_trade_table_name(_exchange, symbol)
 
         # Default since datetime
-        _since_datetime = datetime(2010, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        _since_datetime = datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
         _latest_trade = self._dbutil.get_latest_trade(_exchange, symbol)
         if _latest_trade is not None:
@@ -148,37 +148,40 @@ class TradesDownloadUtil:
                     if self.trades_params[exchange]['max_interval'] > 0 and len(_result) >= self.trades_params[exchange]['limit']:
                         _interval_nsec = max(Decimal(1), floor(_interval_nsec*Decimal(0.5)))
                         _interval_nsec = int(_interval_nsec // self.trades_params[exchange]['start_adjustment_timeunit']) * self.trades_params[exchange]['start_adjustment_timeunit']
-                    else:
-                        if len(_result) > 0:
-                            _df = pd.DataFrame.from_dict(_result)
-                            _df = _df[['datetime', 'id', 'side', 'price', 'amount']].sort_values('datetime', ascending=True).sort_values('id', ascending=True)
 
-                            self._dbutil.df_to_sql(df=_df, schema=_trade_table_name, if_exists = 'append')
-                            
-                            # Update progress bar only when DB write happens
-                            if len(_result) > 0:
-                                if self.trades_params[exchange]['max_interval'] > 0:
-                                    _pbar.n = int(min(_till_timestamp_nsec-_since_timestamp_nsec, _end_timestamp_nsec-_since_timestamp_nsec))
-                                else:
-                                    _pbar.n = int(min(_till_timestamp_nsec-_since_timestamp_nsec, Decimal(dp.parse(_df.iloc[-1]['datetime']).timestamp()).quantize(Decimal('0.000001'))*1_000_000_000-_since_timestamp_nsec))
+                        # Update progress bar
+                        _pbar.set_postfix_str(f'{_exchange}, {symbol}, start: {datetime.utcfromtimestamp(float(_start_timestamp_nsec/1_000_000_000))}, interval: {_interval_nsec/1_000_000_000:.03f}, row_counts: {len(_result)}')
+                        _pbar.refresh()
+                        continue
 
-                                _pbar.set_postfix_str(f'{_exchange}, {symbol}, start: {datetime.utcfromtimestamp(float(_start_timestamp_nsec/1_000_000_000))}, interval: {_interval_nsec/1_000_000_000:.03f}, row_counts: {len(_result)}')
-                            else:
-                                _pbar.n = int(_start_timestamp_nsec - _since_timestamp_nsec)
-                                _pbar.set_postfix_str(f'Exchange: {_exchange}, Symbol: {symbol}, Date = {datetime.utcfromtimestamp(float(_start_timestamp_nsec/1_000_000_000))}, results: 0')
-                            _pbar.refresh()
+                    # If there are more than one result, create dataframe and write to database
+                    if len(_result) > 0:
+                        _df = pd.DataFrame.from_dict(_result)
+                        _df = _df[['datetime', 'id', 'side', 'price', 'amount']].sort_values('datetime', ascending=True).sort_values('id', ascending=True)
+
+                        self._dbutil.df_to_sql(df=_df, schema=_trade_table_name, if_exists = 'append')
                         
-                        if self.trades_params[exchange]['max_interval'] > 0 and len(_result) < self.trades_params[exchange]['limit']*0.9:
+                    # Update progress bar
+                    _pbar.set_postfix_str(f'{_exchange}, {symbol}, start: {datetime.utcfromtimestamp(float(_start_timestamp_nsec/1_000_000_000))}, interval: {_interval_nsec/1_000_000_000:.03f}, row_counts: {len(_result)}')
+                    if self.trades_params[exchange]['max_interval'] > 0:
+                        _pbar.n = int(min(_till_timestamp_nsec-_since_timestamp_nsec, _end_timestamp_nsec-_since_timestamp_nsec))
+                    else:
+                        if len(_result) > 0:                    
+                            _pbar.n = int(min(_till_timestamp_nsec-_since_timestamp_nsec, Decimal(dp.parse(_df.iloc[-1]['datetime']).timestamp()).quantize(Decimal('0.000001'))*1_000_000_000-_since_timestamp_nsec))
+                    _pbar.refresh()
+                    
+                    # Adjust interval
+                    if self.trades_params[exchange]['max_interval'] > 0:
+                        if len(_result) < self.trades_params[exchange]['limit']*0.9:
                             _interval_nsec = min(self.trades_params[exchange]['max_interval'], ceil(_interval_nsec * Decimal(1.05)))
                             _interval_nsec = int(_interval_nsec // self.trades_params[exchange]['start_adjustment_timeunit']) * self.trades_params[exchange]['start_adjustment_timeunit']
-                        if self.trades_params[exchange]['max_interval'] > 0:
-                            if self.trades_params[exchange]['start_adjustment'] is True:
-                                _start_timestamp_nsec = _end_timestamp_nsec + self.trades_params[exchange]['start_adjustment_timeunit']
-                            else:
-                                _start_timestamp_nsec = _end_timestamp_nsec
+                        if self.trades_params[exchange]['start_adjustment'] is True:
+                            _start_timestamp_nsec = _end_timestamp_nsec + self.trades_params[exchange]['start_adjustment_timeunit']
                         else:
-                            if exchange == 'kraken':
-                                _start_timestamp_nsec = Decimal(_df.iloc[-1]['id'])
+                            _start_timestamp_nsec = _end_timestamp_nsec
+                    else:
+                        if exchange == 'kraken':
+                            _start_timestamp_nsec = Decimal(_df.iloc[-1]['id'])
 
                 except ccxt.NetworkError as e:
                     print(f'ccxt.NetworkError : {e}')
