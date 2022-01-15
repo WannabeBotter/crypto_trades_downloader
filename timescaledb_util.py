@@ -1,5 +1,5 @@
 import pandas as pd
-
+from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -19,8 +19,8 @@ class TimeScaleDBUtil:
         if _df.empty == True:
             self.sql_execute("CREATE TYPE enum_side AS ENUM ('buy', 'sell')")
 
-    def read_sql_query(self, sql = '', index_column = ''):
-        df = pd.read_sql_query(sql, self._engine)
+    def read_sql_query(self, sql = '', index_column = '', dtype={}):
+        df = pd.read_sql_query(sql, self._engine, dtype=dtype)
         if len(index_column) > 0:
             df = df.set_index(index_column)
         return df
@@ -46,47 +46,88 @@ class TimeScaleDBUtil:
         
         # トレード記録テーブルを作成
         _sql = (f'DROP TABLE IF EXISTS "{_table_name}" CASCADE;'
-                f' CREATE TABLE IF NOT EXISTS "{_table_name}" (datetime TIMESTAMP WITH TIME ZONE NOT NULL, id text, side enum_side NOT NULL, price NUMERIC NOT NULL, amount NUMERIC NOT NULL, UNIQUE(datetime, id));'
+                f' CREATE TABLE IF NOT EXISTS "{_table_name}" (datetime TIMESTAMP WITH TIME ZONE NOT NULL, id text, side enum_side NOT NULL, liquidation BOOL NOT NULL, price NUMERIC NOT NULL, amount NUMERIC NOT NULL, dollar NUMERIC NOT NULL, dollar_cumsum NUMERIC NOT NULL, UNIQUE(datetime, id));'
                 f' CREATE INDEX ON "{_table_name}" (datetime DESC);'
+                f' CREATE INDEX ON "{_table_name}" (datetime DESC, dollar_cumsum);'
                 f" SELECT create_hypertable ('{_table_name}', 'datetime');")
         self.sql_execute(_sql)
         
-    def get_latest_trade(self, exchange='binance', symbol='BTC/USDT'):
+    def get_latest_trade(self, exchange='ftx', symbol='BTC-PERP'):
         _table_name = self.get_trade_table_name(exchange, symbol)
         
-        _df = self.read_sql_query(f'SELECT * FROM "{_table_name}" ORDER BY datetime DESC, id DESC LIMIT 1')
+        _df = self.read_sql_query(f"select * from information_schema.tables where table_name='{_table_name}'")
+        if _df.empty == True:
+            return None
+        
+        _df = self.read_sql_query(f'SELECT * FROM "{_table_name}" ORDER BY dollar_cumsum DESC LIMIT 1', dtype={'price': str, 'amount': str, 'dollar': str, 'dollar_cumsum': str})
         if len(_df) > 0:
+            _to_decimal = lambda x: Decimal(x)
+            _df['price'] = _df['price'].apply(_to_decimal)
+            _df['amount'] = _df['amount'].apply(_to_decimal)
+            _df['dollar'] = _df['dollar'].apply(_to_decimal)
+            _df['dollar_cumsum'] = _df['dollar_cumsum'].apply(_to_decimal)
             return _df.iloc[0]
         
         return None
     
-    ### 時間足テーブル関係の処理
-    def get_time_table_name(self, exchange, symbol, interval):
-        return (f'{exchange}_{symbol}_{interval}').lower()
-
-    def init_time_aggregate_table(self, exchange='binance', symbol='BTC/USDT', interval='1 day', force = False):
-        _trades_table_name = self.get_trade_table_name(exchange, symbol)
-        _period_table_name = self.get_time_table_name(exchange, symbol, interval.replace(' ', ''))
+    def get_first_trade(self, exchange='ftx', symbol='BTC-PERP'):
+        _table_name = self.get_trade_table_name(exchange, symbol)
         
-        if force == True:
-            sql = (f'DROP MATERIALIZED VIEW IF EXISTS "{_period_table_name}"')
-            self.sql_execute(sql, debug = debug)
-        else:
-            _df = self.read_sql_query(f"SELECT * FROM pg_views WHERE viewname='{_period_table_name}';")
-            if len(_df) > 0:
-                return
-
-        sql = (f'CREATE MATERIALIZED VIEW "{_period_table_name}" WITH (timescaledb.continuous) AS SELECT '
-               f"time_bucket(INTERVAL '{interval}', datetime) AS time,"
-               f"first(price, datetime) AS open,"
-               f"MAX(price) AS high,"
-               f"MIN(price) AS low,"
-               f"last(price, datetime) AS close,"
-               f"SUM(amount*price) AS volume,"
-               f"SUM(CASE WHEN side='buy' THEN amount*price ELSE 0 END) AS buy_volume,"
-               f"SUM(CASE WHEN side='sell' THEN amount*price ELSE 0 END) AS sell_volume,"
-               f"COUNT(id) AS trades_count "
-               f'FROM "{_trades_table_name}" GROUP BY time WITH NO DATA;'
-               f"SELECT add_continuous_aggregate_policy('{_period_table_name}',start_offset => NULL,end_offset => '{interval}',schedule_interval => INTERVAL '{interval}');"
-               f'ALTER MATERIALIZED VIEW "{_period_table_name}" set (timescaledb.materialized_only = false);')
-        self.sql_execute(sql)
+        _df = self.read_sql_query(f"select * from information_schema.tables where table_name='{_table_name}'")
+        if _df.empty == True:
+            return None
+        
+        _df = self.read_sql_query(f'SELECT * FROM "{_table_name}" ORDER BY dollar_cumsum ASC LIMIT 1', dtype={'price': str, 'amount': str, 'dollar': str, 'dollar_cumsum': str})
+        if len(_df) > 0:
+            _to_decimal = lambda x: Decimal(x)
+            _df['price'] = _df['price'].apply(_to_decimal)
+            _df['amount'] = _df['amount'].apply(_to_decimal)
+            _df['dollar'] = _df['dollar'].apply(_to_decimal)
+            _df['dollar_cumsum'] = _df['dollar_cumsum'].apply(_to_decimal)
+            return _df.iloc[0]
+        
+        return None
+    
+    ### ドルバーテーブル関係の処理
+    def get_dollarbar_table_name(self, exchange, symbol, interval):
+        return (f'{exchange}_{symbol}_dollarbar_{interval}').lower()
+    
+    def init_dollarbar_table(self, exchange='ftx', symbol='BTC-PERP', interval=10_000_000, force=False):    
+        _table_name = self.get_dollarbar_table_name(exchange, symbol, interval)
+        
+        _df = self.read_sql_query(f"select * from information_schema.tables where table_name='{_table_name}'")
+        if _df.empty == False and force == False:
+            return
+        
+        # ドルバー記録テーブルを作成
+        _sql = (f'DROP TABLE IF EXISTS "{_table_name}" CASCADE;'
+                f' CREATE TABLE IF NOT EXISTS "{_table_name}" (datetime TIMESTAMP WITH TIME ZONE NOT NULL, datetime_from TIMESTAMP WITH TIME ZONE NOT NULL, id text, id_from text, open NUMERIC NOT NULL, high NUMERIC NOT NULL, low NUMERIC NOT NULL, close NUMERIC NOT NULL, amount NUMERIC NOT NULL, dollar_volume NUMERIC NOT NULL, dollar_buy_volume NUMERIC NOT NULL, dollar_sell_volume NUMERIC NOT NULL, dollar_liquidation_buy_volume NUMERIC NOT NULL, dollar_liquidation_sell_volume NUMERIC NOT NULL, dollar_cumsum NUMERIC NOT NULL, UNIQUE(datetime, id));'
+                f' CREATE INDEX ON "{_table_name}" (datetime DESC);'
+                f' CREATE INDEX ON "{_table_name}" (datetime DESC, dollar_cumsum);'
+                f" SELECT create_hypertable ('{_table_name}', 'datetime');")
+        self.sql_execute(_sql)
+        
+    def get_latest_dollarbar(self, exchange='ftx', symbol='BTC-PERP', interval=10_000_000):
+        _table_name = self.get_dollarbar_table_name(exchange, symbol, interval)
+        
+        _df = self.read_sql_query(f"select * from information_schema.tables where table_name='{_table_name}'")
+        if _df.empty == True:
+            return None
+        
+        _df = self.read_sql_query(f'SELECT * FROM "{_table_name}" ORDER BY datetime DESC, id DESC LIMIT 1', dtype={'open': str, 'high': str, 'low': str, 'close': str, 'amount': str, 'dollar_volume': str, 'dollar_buy_volume': str, 'dollar_sell_volume': str, 'dollar_cumsum': str})
+        if len(_df) > 0:
+            _to_decimal = lambda x: Decimal(x)
+            _df['open'] = _df['open'].apply(_to_decimal)
+            _df['high'] = _df['high'].apply(_to_decimal)
+            _df['low'] = _df['low'].apply(_to_decimal)
+            _df['close'] = _df['close'].apply(_to_decimal)
+            _df['amount'] = _df['amount'].apply(_to_decimal)
+            _df['dollar_volume'] = _df['dollar_volume'].apply(_to_decimal)
+            _df['dollar_buy_volume'] = _df['dollar_buy_volume'].apply(_to_decimal)
+            _df['dollar_sell_volume'] = _df['dollar_sell_volume'].apply(_to_decimal)
+            _df['dollar_liquidation_buy_volume'] = _df['dollar_liquidation_buy_volume'].apply(_to_decimal)
+            _df['dollar_liquidation_sell_volume'] = _df['dollar_liquidation_sell_volume'].apply(_to_decimal)
+            _df['dollar_cumsum'] = _df['dollar_cumsum'].apply(_to_decimal)
+            return _df.iloc[0]
+        
+        return None
