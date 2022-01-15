@@ -188,7 +188,7 @@ class TradesDownloadUtil:
                         
                         _dollar_cumsum_offset = _df.iloc[-1]['dollar_cumsum']
                         
-                    # Update progress bar
+                    # プログレスバーを更新
                     _pbar.set_postfix_str(f'{_exchange}, {symbol}, start: {datetime.utcfromtimestamp(float(_start_timestamp_nsec/1_000_000_000))}, interval: {_interval_nsec/1_000_000_000:.03f}, row_counts: {len(_result)}')
                     if self.trades_params[exchange]['max_interval'] > 0:
                         _pbar.n = int(_end_timestamp_nsec-_since_timestamp_nsec)
@@ -197,10 +197,10 @@ class TradesDownloadUtil:
                             _pbar.n = int(Decimal(dp.parse(_df.iloc[-1]['datetime']).timestamp()).quantize(Decimal('0.000001'))*1_000_000_000-_since_timestamp_nsec)
                     _pbar.refresh()
                     
-                    # Adjust interval
+                    # 約定データの取得間隔を調整
                     if self.trades_params[exchange]['max_interval'] > 0:
                         if len(_result) < self.trades_params[exchange]['limit']*0.9:
-                            _interval_nsec = min(self.trades_params[exchange]['max_interval'], ceil(_interval_nsec * Decimal(1.05)))
+                            _interval_nsec = min(self.trades_params[exchange]['max_interval'], ceil(_interval_nsec / self.trades_params[exchange]['start_adjustment_timeunit'] * Decimal(1.05)) * self.trades_params[exchange]['start_adjustment_timeunit'])
                             _interval_nsec = int(_interval_nsec // self.trades_params[exchange]['start_adjustment_timeunit']) * self.trades_params[exchange]['start_adjustment_timeunit']
                         if self.trades_params[exchange]['start_adjustment'] is True:
                             _start_timestamp_nsec = _end_timestamp_nsec + self.trades_params[exchange]['start_adjustment_timeunit']
@@ -217,6 +217,4 @@ class TradesDownloadUtil:
                     break
                 except:
                     print(f'Other exceptions : {traceback.format_exc()}')
-                    print(_params)
-                    #print(_result)
                     break
