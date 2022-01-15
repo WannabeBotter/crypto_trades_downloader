@@ -32,7 +32,7 @@ def main():
         print(f'{args.exchange} is not supported')
         return
 
-    _tradesutil.download_trades(exchange=args.exchange, symbol=args.symbol, since_datetime=datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc))
+    _tradesutil.download_trades(exchange=args.exchange, symbol=args.symbol, since_datetime=datetime(2019, 3, 5, 0, 0, 0, tzinfo=timezone.utc))
 
 if __name__ == "__main__":
     main()
