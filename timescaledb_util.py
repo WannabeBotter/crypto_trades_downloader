@@ -114,7 +114,7 @@ class TimeScaleDBUtil:
         if _df.empty == True:
             return None
         
-        _df = self.read_sql_query(f'SELECT * FROM "{_table_name}" ORDER BY datetime DESC, id DESC LIMIT 1', dtype={'open': str, 'high': str, 'low': str, 'close': str, 'amount': str, 'dollar_volume': str, 'dollar_buy_volume': str, 'dollar_sell_volume': str, 'dollar_cumsum': str})
+        _df = self.read_sql_query(f'SELECT * FROM "{_table_name}" ORDER BY datetime DESC, id DESC LIMIT 1', dtype={'open': str, 'high': str, 'low': str, 'close': str, 'amount': str, 'dollar_volume': str, 'dollar_buy_volume': str, 'dollar_sell_volume': str, 'dollar_liquidation_buy_volume': str, 'dollar_liquidation_sell_volume': str, 'dollar_cumsum': str})
         if len(_df) > 0:
             _to_decimal = lambda x: Decimal(x)
             _df['open'] = _df['open'].apply(_to_decimal)
