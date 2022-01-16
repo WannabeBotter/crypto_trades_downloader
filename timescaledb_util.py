@@ -59,7 +59,7 @@ class TimeScaleDBUtil:
         if _df.empty == True:
             return None
         
-        _df = self.read_sql_query(f'SELECT * FROM "{_table_name}" ORDER BY dollar_cumsum DESC LIMIT 1', dtype={'price': str, 'amount': str, 'dollar': str, 'dollar_cumsum': str})
+        _df = self.read_sql_query(f'WITH time_filtered AS (SELECT * FROM "{_table_name}" ORDER BY datetime DESC LIMIT 1000) SELECT * FROM time_filtered ORDER BY dollar_cumsum DESC LIMIT 1', dtype={'price': str, 'amount': str, 'dollar': str, 'dollar_cumsum': str})
         if len(_df) > 0:
             _to_decimal = lambda x: Decimal(x)
             _df['price'] = _df['price'].apply(_to_decimal)
@@ -77,7 +77,7 @@ class TimeScaleDBUtil:
         if _df.empty == True:
             return None
         
-        _df = self.read_sql_query(f'SELECT * FROM "{_table_name}" ORDER BY dollar_cumsum ASC LIMIT 1', dtype={'price': str, 'amount': str, 'dollar': str, 'dollar_cumsum': str})
+        _df = self.read_sql_query(f'WITH time_filtered AS (SELECT * FROM "{_table_name}" ORDER BY datetime ASC LIMIT 1000) SELECT * FROM time_filtered ORDER BY dollar_cumsum ASC LIMIT 1', dtype={'price': str, 'amount': str, 'dollar': str, 'dollar_cumsum': str})
         if len(_df) > 0:
             _to_decimal = lambda x: Decimal(x)
             _df['price'] = _df['price'].apply(_to_decimal)
