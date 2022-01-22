@@ -1,4 +1,4 @@
-import time
+from time import mktime, sleep
 from tqdm import tqdm
 import traceback
 
@@ -55,6 +55,13 @@ class TradesDownloadUtil:
             'start_adjustment_timeunit': Decimal(1_000_000_000),
             'start_adjustment': True,
             'ratelimit_multiplier': 1.0
+        },
+        'bybit': {
+            'limit': 0,
+            'max_interval': 0,
+            'start_adjustment_timeunit': Decimal(0),
+            'start_adjustment': False,
+            'ratelimit_multiplier': 1.0
         }
     }
     
@@ -100,6 +107,9 @@ class TradesDownloadUtil:
     def download_trades(self, exchange=None, symbol=None, since_datetime=None):
         if exchange is None or symbol is None:
             return
+        elif exchange == 'bybit':
+            self.download_bybit_trades(exchange, symbol, since_datetime)
+            return
         
         # 取引所情報の取得
         _exchange = exchange
@@ -112,7 +122,7 @@ class TradesDownloadUtil:
         # 約定テーブルを初期化
         self._dbutil.init_trade_table(_exchange, symbol, force=False)
         _trade_table_name = self._dbutil.get_trade_table_name(_exchange, symbol)
-
+        
         # デフォルトの開始時間と取引額オフセット
         _since_datetime = datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         _dollar_cumsum_offset = Decimal(0)
@@ -147,7 +157,7 @@ class TradesDownloadUtil:
         with tqdm(total = int(_total_seconds_nsec), initial=0) as _pbar:
             while _start_timestamp_nsec < _till_timestamp_nsec:
                 try:
-                    time.sleep(_ccxt_client.rateLimit * self.trades_params[exchange]['ratelimit_multiplier'] / 1000)
+                    sleep(_ccxt_client.rateLimit * self.trades_params[exchange]['ratelimit_multiplier'] / 1000)
                     
                     # 取得最大間隔が0よりも大きい場合、今回のダウンロードの終了時間を更新する
                     if self.trades_params[exchange]['max_interval'] > 0:
@@ -218,3 +228,81 @@ class TradesDownloadUtil:
                 except:
                     print(f'Other exceptions : {traceback.format_exc()}')
                     break
+    
+    def download_bybit_trades(self, exchange=None, symbol=None, since_datetime=None):
+        # 取引所情報の取得
+        _exchange = exchange
+        _symbol = symbol
+        _ccxt_client = getattr(ccxt, _exchange)()
+        _ccxt_client.load_markets()
+        _ccxt_market = _ccxt_client.market(_symbol)
+        _price_precision = _ccxt_market['precision']['price']
+        _amount_precision = _ccxt_market['precision']['amount']
+        
+        # 約定テーブルを初期化
+        self._dbutil.init_trade_table('bybit', _symbol, force=False)
+        _trade_table_name = self._dbutil.get_trade_table_name(_exchange, _symbol)
+        
+        # 各種設定
+        _target_baseurl = 'https://public.bybit.com/trading'
+        _exchange_symbol = _symbol.replace('/', '')
+
+        _latest_trade = self._dbutil.get_latest_trade(_exchange, _symbol)
+        if _latest_trade is not None:
+            _since_datetime = _latest_trade['datetime'] + timedelta(days=1)
+            _since_datetime = _since_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
+            _dollar_cumsum_offset = Decimal(_latest_trade['dollar_cumsum'])
+            print('Dowload will resume after this last trade in DB')
+            print(_since_datetime)
+        else:
+            _since_datetime = dp.parse('2019-10-01 00:00:00.000+00')
+            _dollar_cumsum_offset = Decimal(0)
+
+        _now = datetime.now(timezone.utc)
+        _end_datetime = datetime(_now.year, _now.month, _now.day, 0, 0, 0, tzinfo=timezone.utc)    
+        _target_datetime = _since_datetime
+        
+        with tqdm(total = mktime(_end_datetime.timetuple())*1_000_000 - mktime(_since_datetime.timetuple())*1_000_000, initial=0) as _pbar:
+            while True:
+                # 終了条件判定
+                _now = datetime.now(timezone.utc)
+                _end_datetime = datetime(_now.year, _now.month, _now.day, 0, 0, 0, tzinfo=timezone.utc)
+
+                _pbar.n = mktime(_target_datetime.timetuple())*1_000_000 - mktime(_since_datetime.timetuple())*1_000_000
+                _pbar.set_postfix_str(f'Exchange: {_exchange}, Symbol: {_symbol}, Date = {_target_datetime}')
+
+                if _target_datetime >= _end_datetime:
+                    # すでに今日までのデータを読み終わっている
+                    break
+
+                # Bybitのファイル名を生成
+                _target_url = f'{_target_baseurl}/{_exchange_symbol}/{_exchange_symbol}{_target_datetime.year:04d}-{_target_datetime.month:02d}-{_target_datetime.day:02d}.csv.gz'
+
+                # CSVファイルをデータフレームとしてダウンロード
+                try:
+                    _df = pd.read_csv(_target_url, compression='gzip', dtype='str')
+                except:
+                    # 何らかの例外が発生したので1秒待ってリトライ
+                    sleep(1)
+                    continue
+
+                # データフレームの加工
+                _df.sort_values('timestamp', inplace=True)
+                _df['datetime'] = pd.to_datetime(_df['timestamp'].apply(float), unit='s').dt.tz_localize('UTC')
+                _df.reset_index(drop=True, inplace=True)
+                _df['side'] = _df['side'].str.lower()
+                _df['size'] = _df['foreignNotional'].apply(Decimal)
+                _df['price'] = _df['price'].apply(Decimal)
+                _df['liquidation'] = False # BybitはLiquidation情報を持っていないがFalseとして付け加えておく
+                _df['dollar'] = _df['size']*_df['price']
+                _df['dollar_cumsum'] = _df['dollar'].cumsum() + _dollar_cumsum_offset
+                _df.drop(['timestamp', 'symbol', 'tickDirection', 'grossValue', 'homeNotional', 'foreignNotional'], axis=1, inplace=True) # 必要ない列を削除
+                _df.columns = ['side', 'amount', 'price', 'id', 'datetime', 'liquidation', 'dollar', 'dollar_cumsum']
+                _df = _df.reindex(['datetime', 'id', 'side', 'liquidation', 'price', 'amount', 'dollar', 'dollar_cumsum'], axis=1)
+
+
+                self._dbutil.df_to_sql(df=_df, schema=_trade_table_name, if_exists = 'append')
+
+                _target_datetime = _target_datetime + timedelta(days=1)
+                if len(_df) > 0:
+                    _dollar_cumsum_offset = _df.iloc[-1]['dollar_cumsum']
