@@ -46,7 +46,7 @@ class TimeScaleDBUtil:
         
         # トレード記録テーブルを作成
         _sql = (f'DROP TABLE IF EXISTS "{_table_name}" CASCADE;'
-                f' CREATE TABLE IF NOT EXISTS "{_table_name}" (datetime TIMESTAMP WITH TIME ZONE NOT NULL, id text, side enum_side NOT NULL, liquidation BOOL NOT NULL, price NUMERIC NOT NULL, amount NUMERIC NOT NULL, dollar NUMERIC NOT NULL, dollar_cumsum NUMERIC NOT NULL, UNIQUE(datetime, id));'
+                f' CREATE TABLE IF NOT EXISTS "{_table_name}" (datetime TIMESTAMP WITH TIME ZONE NOT NULL, id text, side enum_side NOT NULL, liquidation BOOL NOT NULL, price NUMERIC NOT NULL, amount NUMERIC NOT NULL, dollar NUMERIC NOT NULL, dollar_cumsum NUMERIC NOT NULL, buy_dollar_cumsum NUMERIC NOT NULL, sell_dollar_cumsum NUMERIC NOT NULL, UNIQUE(datetime, id));'
                 f' CREATE INDEX ON "{_table_name}" (datetime DESC);'
                 f' CREATE INDEX ON "{_table_name}" (datetime DESC, dollar_cumsum);'
                 f" SELECT create_hypertable ('{_table_name}', 'datetime');")
@@ -59,13 +59,15 @@ class TimeScaleDBUtil:
         if _df.empty == True:
             return None
         
-        _df = self.read_sql_query(f'WITH time_filtered AS (SELECT * FROM "{_table_name}" ORDER BY datetime DESC LIMIT 1000) SELECT * FROM time_filtered ORDER BY dollar_cumsum DESC LIMIT 1', dtype={'price': str, 'amount': str, 'dollar': str, 'dollar_cumsum': str})
+        _df = self.read_sql_query(f'WITH time_filtered AS (SELECT * FROM "{_table_name}" ORDER BY datetime DESC LIMIT 1000) SELECT * FROM time_filtered ORDER BY dollar_cumsum DESC LIMIT 1', dtype={'price': str, 'amount': str, 'dollar': str, 'dollar_cumsum': str, 'buy_dollar_cumsum': str, 'sell_dollar_cumsum': str})
         if len(_df) > 0:
             _to_decimal = lambda x: Decimal(x)
             _df['price'] = _df['price'].apply(_to_decimal)
             _df['amount'] = _df['amount'].apply(_to_decimal)
             _df['dollar'] = _df['dollar'].apply(_to_decimal)
             _df['dollar_cumsum'] = _df['dollar_cumsum'].apply(_to_decimal)
+            _df['buy_dollar_cumsum'] = _df['buy_dollar_cumsum'].apply(_to_decimal)
+            _df['sell_dollar_cumsum'] = _df['sell_dollar_cumsum'].apply(_to_decimal)
             return _df.iloc[0]
         
         return None
@@ -84,6 +86,8 @@ class TimeScaleDBUtil:
             _df['amount'] = _df['amount'].apply(_to_decimal)
             _df['dollar'] = _df['dollar'].apply(_to_decimal)
             _df['dollar_cumsum'] = _df['dollar_cumsum'].apply(_to_decimal)
+            _df['buy_dollar_cumsum'] = _df['buy_dollar_cumsum'].apply(_to_decimal)
+            _df['sell_dollar_cumsum'] = _df['sell_dollar_cumsum'].apply(_to_decimal)
             return _df.iloc[0]
         
         return None
@@ -101,7 +105,7 @@ class TimeScaleDBUtil:
         
         # ドルバー記録テーブルを作成
         _sql = (f'DROP TABLE IF EXISTS "{_table_name}" CASCADE;'
-                f' CREATE TABLE IF NOT EXISTS "{_table_name}" (datetime TIMESTAMP WITH TIME ZONE NOT NULL, datetime_from TIMESTAMP WITH TIME ZONE NOT NULL, id text, id_from text, open NUMERIC NOT NULL, high NUMERIC NOT NULL, low NUMERIC NOT NULL, close NUMERIC NOT NULL, amount NUMERIC NOT NULL, dollar_volume NUMERIC NOT NULL, dollar_buy_volume NUMERIC NOT NULL, dollar_sell_volume NUMERIC NOT NULL, dollar_liquidation_buy_volume NUMERIC NOT NULL, dollar_liquidation_sell_volume NUMERIC NOT NULL, dollar_cumsum NUMERIC NOT NULL, UNIQUE(datetime, id));'
+                f' CREATE TABLE IF NOT EXISTS "{_table_name}" (datetime TIMESTAMP WITH TIME ZONE NOT NULL, datetime_from TIMESTAMP WITH TIME ZONE NOT NULL, id text, id_from text, open NUMERIC NOT NULL, high NUMERIC NOT NULL, low NUMERIC NOT NULL, close NUMERIC NOT NULL, amount NUMERIC NOT NULL, dollar_volume NUMERIC NOT NULL, dollar_buy_volume NUMERIC NOT NULL, dollar_sell_volume NUMERIC NOT NULL, dollar_liquidation_buy_volume NUMERIC NOT NULL, dollar_liquidation_sell_volume NUMERIC NOT NULL, dollar_cumsum NUMERIC NOT NULL, buy_dollar_cumsum NUMERIC NOT NULL, sell_dollar_cumsum NUMERIC NOT NULL, UNIQUE(datetime, id));'
                 f' CREATE INDEX ON "{_table_name}" (datetime DESC);'
                 f' CREATE INDEX ON "{_table_name}" (datetime DESC, dollar_cumsum);'
                 f" SELECT create_hypertable ('{_table_name}', 'datetime');")
@@ -128,6 +132,8 @@ class TimeScaleDBUtil:
             _df['dollar_liquidation_buy_volume'] = _df['dollar_liquidation_buy_volume'].apply(_to_decimal)
             _df['dollar_liquidation_sell_volume'] = _df['dollar_liquidation_sell_volume'].apply(_to_decimal)
             _df['dollar_cumsum'] = _df['dollar_cumsum'].apply(_to_decimal)
+            _df['dollar_buy_cumsum'] = _df['dollar_buy_cumsum'].apply(_to_decimal)
+            _df['dollar_sell_cumsum'] = _df['dollar_sell_cumsum'].apply(_to_decimal)
             return _df.iloc[0]
         
         return None
