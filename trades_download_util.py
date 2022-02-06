@@ -126,12 +126,16 @@ class TradesDownloadUtil:
         # デフォルトの開始時間と取引額オフセット
         _since_datetime = datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         _dollar_cumsum_offset = Decimal(0)
+        _buy_dollar_cumsum_offset = Decimal(0)
+        _sell_dollar_cumsum_offset = Decimal(0)
 
         # 約定データがDBにすでにあるならば最も新しい約定を取得して開始時間として設定
         _latest_trade = self._dbutil.get_latest_trade(_exchange, symbol)
         if _latest_trade is not None:
             _since_datetime = _latest_trade['datetime'] + timedelta(seconds=float(self.trades_params[exchange]['start_adjustment_timeunit']/1_000_000_000))
             _dollar_cumsum_offset = Decimal(_latest_trade['dollar_cumsum'])
+            _buy_dollar_cumsum_offset = Decimal(_latest_trade['buy_dollar_cumsum'])
+            _sell_dollar_cumsum_offset = Decimal(_latest_trade['sell_dollar_cumsum'])
             print('Dowload will resume after this last trade in DB')
             print(_latest_trade)
         else:
@@ -175,7 +179,7 @@ class TradesDownloadUtil:
                         _pbar.set_postfix_str(f'{_exchange}, {symbol}, start: {datetime.utcfromtimestamp(float(_start_timestamp_nsec/1_000_000_000))}, interval: {_interval_nsec/1_000_000_000:.03f}, row_counts: {len(_result)}')
                         _pbar.refresh()
                         continue
-
+                    
                     if len(_result) > 0:
                         # _resultにliquidationの情報を付加する
                         for _item in _result:
@@ -185,18 +189,31 @@ class TradesDownloadUtil:
                                 _item['liquidation'] = False
 
                         # もし1個以上のデータがダウンロードされていたら、データベースに書き込む
+                        _to_decimal = lambda x: Decimal(x)
+                        
                         _df = pd.DataFrame.from_dict(_result, dtype=str)
                         _df = _df[['datetime', 'id', 'side', 'liquidation', 'price', 'amount']].sort_values('datetime', ascending=True).sort_values('id', ascending=True)
-                        _df.sort_values('datetime', ascending=True).sort_values('id', ascending=True)
-                        _to_decimal = lambda x: Decimal(x)
+                        
+                        _df['buy_dollar'] = Decimal(0)
+                        _df['sell_dollar'] = Decimal(0)
+                        
                         _df['price'] = _df['price'].apply(_to_decimal)
                         _df['amount'] = _df['amount'].apply(_to_decimal)
                         _df['dollar'] = _df['price'] * _df['amount']
                         _df['dollar_cumsum'] = _df['dollar'].cumsum() + _dollar_cumsum_offset
-
+                        
+                        _df.loc[_df['side'] == 'buy', 'buy_dollar'] = _df['dollar']
+                        _df.loc[_df['side'] == 'sell', 'sell_dollar'] = _df['dollar']
+                        _df['buy_dollar_cumsum'] = _df['buy_dollar'].cumsum() + _buy_dollar_cumsum_offset
+                        _df['sell_dollar_cumsum'] = _df['sell_dollar'].cumsum() + _sell_dollar_cumsum_offset
+                        
+                        _df.drop(['buy_dollar', 'sell_dollar'], axis=1, inplace=True)
+                        
                         self._dbutil.df_to_sql(df=_df, schema=_trade_table_name, if_exists = 'append')
                         
                         _dollar_cumsum_offset = _df.iloc[-1]['dollar_cumsum']
+                        _buy_dollar_cumsum_offset = _df.iloc[-1]['buy_dollar_cumsum']
+                        _sell_dollar_cumsum_offset = _df.iloc[-1]['sell_dollar_cumsum']
                         
                     # プログレスバーを更新
                     _pbar.set_postfix_str(f'{_exchange}, {symbol}, start: {datetime.utcfromtimestamp(float(_start_timestamp_nsec/1_000_000_000))}, interval: {_interval_nsec/1_000_000_000:.03f}, row_counts: {len(_result)}')
@@ -282,8 +299,8 @@ class TradesDownloadUtil:
                 try:
                     _df = pd.read_csv(_target_url, compression='gzip', dtype='str')
                 except:
-                    # 何らかの例外が発生したので1秒待ってリトライ
-                    sleep(1)
+                    # 何らかの例外が発生したので3秒待ってリトライ
+                    sleep(3)
                     continue
 
                 # データフレームの加工
@@ -294,7 +311,7 @@ class TradesDownloadUtil:
                 _df['size'] = _df['foreignNotional'].apply(Decimal)
                 _df['price'] = _df['price'].apply(Decimal)
                 _df['liquidation'] = False # BybitはLiquidation情報を持っていないがFalseとして付け加えておく
-                _df['dollar'] = _df['size']*_df['price']
+                _df['dollar'] = _df['homeNotional'].apply(Decimal)
                 _df['dollar_cumsum'] = _df['dollar'].cumsum() + _dollar_cumsum_offset
                 _df.drop(['timestamp', 'symbol', 'tickDirection', 'grossValue', 'homeNotional', 'foreignNotional'], axis=1, inplace=True) # 必要ない列を削除
                 _df.columns = ['side', 'amount', 'price', 'id', 'datetime', 'liquidation', 'dollar', 'dollar_cumsum']

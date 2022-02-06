@@ -28,7 +28,9 @@ def dollarbar_aggregate(x):
        'dollar_sell_volume': x.loc[x['side'] == 'sell', 'dollar'].sum(),
        'dollar_liquidation_buy_volume': x.loc[(x['side'] == 'buy') & (x['liquidation'] == True), 'dollar'].sum(),
        'dollar_liquidation_sell_volume': x.loc[(x['side'] == 'sell') & (x['liquidation'] == True), 'dollar'].sum(),
-       'dollar_cumsum': x.iloc[-1]['dollar_cumsum']
+       'dollar_cumsum': x.iloc[-1]['dollar_cumsum'],
+       'buy_dollar_cumsum': x.iloc[-1]['buy_dollar_cumsum'],
+       'sell_dollar_cumsum': x.iloc[-1]['sell_dollar_cumsum']
    }
    return pd.Series(y)
 
@@ -110,6 +112,8 @@ class DollarbarGenerateUtil:
                 _df_new_trades['amount'] = _df_new_trades['amount'].apply(_to_decimal)
                 _df_new_trades['dollar'] = _df_new_trades['dollar'].apply(_to_decimal)
                 _df_new_trades['dollar_cumsum'] = _df_new_trades['dollar_cumsum'].apply(_to_decimal)
+                _df_new_trades['buy_dollar_cumsum'] = _df_new_trades['buy_dollar_cumsum'].apply(_to_decimal)
+                _df_new_trades['sell_dollar_cumsum'] = _df_new_trades['sell_dollar_cumsum'].apply(_to_decimal)
 
                 # 処理中のデータフレームに結合させ、ドルバーIDを再計算
                 _df_trades = pd.concat([_df_trades, _df_new_trades]).sort_values('dollar_cumsum')
