@@ -101,7 +101,7 @@ class DollarbarGenerateUtil:
 
             while _head_dollar_cumsum < _tail_dollar_cumsum:
                 _sql = f'WITH time_filtered AS (SELECT * FROM \"{_trade_table_name}\" WHERE datetime >= \'{_current_datetime}\' ORDER BY datetime ASC LIMIT 10000) SELECT * from time_filtered WHERE dollar_cumsum > {_current_dollar_cumsum} AND id != \'{_current_id}\' ORDER BY dollar_cumsum ASC'
-                _df_new_trades = self._dbutil.read_sql_query(_sql, dtype={'price': str, 'amount': str, 'dollar': str, 'dollar_cumsum': str})
+                _df_new_trades = self._dbutil.read_sql_query(_sql, dtype={'price': str, 'amount': str, 'dollar': str, 'dollar_cumsum': str, 'buy_dollar_cumsum': str, 'sell_dollar_cumsum': str})
 
                 # もう読み込むデータがなければ終了
                 if len(_df_new_trades) <= 0:
