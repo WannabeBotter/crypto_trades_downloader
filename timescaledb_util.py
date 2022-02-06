@@ -167,7 +167,7 @@ class TimeScaleDBUtil:
                 f" SELECT create_hypertable ('{_table_name}', 'datetime');")
         self.sql_execute(_sql)
         
-    def get_latest_dollarbar(self, exchange='ftx', symbol='BTC-PERP', interval=10_000_000):
+    def get_latest_dollarbar(self, exchange='ftx', symbol='BTC-PERP', interval=5_000_000):
         _table_name = self.get_dollarbar_table_name(exchange, symbol, interval)
         
         _df = self.read_sql_query(f"select * from information_schema.tables where table_name='{_table_name}'")
@@ -193,3 +193,11 @@ class TimeScaleDBUtil:
             return _df.iloc[0]
         
         return None
+
+    def load_dollarbars(exchange='ftx', symbol='BTC-PERP', interval=5_000_000, from_str, to_str):
+        _table_name = self.get_dollarbar_table_name(exchange, symbol, interval)
+
+        _sql = f"SELECT * FROM \"{table_name}\" WHERE datetime >= '{from_str}' AND datetime < '{to_str}' ORDER BY dollar_cumsum ASC"
+        _df = _dbutil.read_sql_query(sql = _sql)
+        _df = _df[['datetime', 'open', 'high', 'low', 'close', 'dollar_volume', 'dollar_buy_volume', 'dollar_sell_volume', 'dollar_liquidation_buy_volume', 'dollar_liquidation_sell_volume', 'dollar_cumsum', 'dollar_buy_cumsum', 'dollar_sell_cumsum']]
+        return df
